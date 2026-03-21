@@ -1,0 +1,43 @@
+name: Lint Contracts
+
+on:
+  push:
+    paths:
+      - '**.sol'
+  pull_request:
+    paths:
+      - '**.sol'
+
+jobs:
+  solhint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      - name: Install solhint
+        run: npm install -g solhint
+
+      - name: Run Solhint
+        run: solhint "**/*.sol" --max-warnings 0
+        continue-on-error: false
+
+  foundry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Build contracts
+        run: forge build --all
+
+      - name: Run tests
+        run: forge test -vv
