@@ -1,0 +1,15 @@
+{
+  "name": "web3-wednesdays",
+  "version": "1.0.0",
+  "description": "Web3 Wednesdays Security Training Platform",
+  "private": true,
+  "scripts": {
+    "dev": "cd next-app && npm run dev",
+    "build": "cd next-app && npm run build",
+    "start": "cd next-app && npm run start",
+    "lint": "cd next-app && npm run lint"
+  },
+  "workspaces": [
+    "next-app"
+  ]
+}
