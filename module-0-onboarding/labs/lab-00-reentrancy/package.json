@@ -1,0 +1,11 @@
+{
+  "name": "web3-wednesdays-lab-00-reentrancy",
+  "version": "1.0.0",
+  "description": "Week 0: Reentrancy Vulnerability Lab",
+  "scripts": {
+    "build": "forge build",
+    "test": "forge test -vv",
+    "test:gas": "forge test --gas-report",
+    "clean": "forge clean"
+  }
+}
