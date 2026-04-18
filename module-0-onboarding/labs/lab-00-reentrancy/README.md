@@ -1,8 +1,9 @@
 # Lab 00: Reentrancy Vulnerability
 
-**Difficulty:** ⭐ Beginner  
-**Duration:** 20 minutes  
-**Learning Goal:** Understand the reentrancy vulnerability and how to exploit it
+**Difficulty**: Beginner  
+**Time**: 20-30 minutes  
+**Prerequisites**: Foundry installed, basic Solidity knowledge  
+**Learning Outcomes**: Understand reentrancy attacks, recognize vulnerable patterns, write exploit POCs
 
 ---
 
@@ -10,274 +11,201 @@
 
 **These contracts are INTENTIONALLY VULNERABLE for educational purposes only.**
 
-- ❌ DO NOT deploy these contracts to mainnet
-- ❌ DO NOT send real funds to these contracts
-- ✅ Use on test networks (Foundry, Hardhat) only
-- ✅ These labs teach common vulnerabilities to help you recognize and prevent them
-
-For more information, see [Responsible Disclosure Policy](https://www.openzeppelin.com/security).
+- **DO NOT** deploy to mainnet or testnet with real funds
+- **DO NOT** use this code in production
+- These contracts demonstrate real vulnerabilities to help you recognize and prevent them
 
 ---
 
-## 🎯 Learning Objectives
+## 📚 What You'll Learn
 
-By the end of this lab, you will:
+### Reentrancy Attack
+A **reentrancy** vulnerability allows an attacker to call back into a contract while it's still processing, causing funds to be withdrawn multiple times before state is updated.
 
-1. **Understand reentrancy** — What it is and why it's dangerous
-2. **Recognize vulnerable patterns** — Code that allows reentrancy
-3. **Execute an exploit** — Use Foundry to demonstrate the attack
-4. **Apply fixes** — Understand how to prevent reentrancy
+**The Attack Pattern:**
+1. Attacker deposits 10 ETH into VulnerableBank
+2. Attacker calls withdraw(10 ETH)
+3. VulnerableBank sends ETH via call{} (external call)
+4. Attacker's receive() hook is triggered
+5. While in receive(), attacker calls withdraw() AGAIN
+6. VulnerableBank checks balance: still 10 ETH (state not updated yet!)
+7. Attacker withdraws another 10 ETH
+8. Repeat steps 5-7 multiple times
+9. Bank is drained
 
----
-
-## 📚 Background: What is Reentrancy?
-
-### Simple Explanation
-
-Reentrancy happens when a contract calls another contract while its own state hasn't been updated yet.
-
-**Visual example:**
-
-```
-1. Bank calls attacker.withdraw()
-2. Bank sends ETH to attacker (external call)
-3. While ETH is being sent, attacker's receive() function runs
-4. receive() calls withdraw() AGAIN before first withdraw finished
-5. Cycle repeats = attacker steals more than they had!
-```
-
-### Why It Matters
-
-In 2016, the **DAO hack** exploited reentrancy to steal $50M worth of ETH. Today, it remains one of the top smart contract vulnerabilities.
-
-### The Vulnerable Pattern
-
+**Why This Happens:**
+VulnerableBank follows this flawed pattern:
 ```solidity
-function withdraw() public {
-    uint256 amount = balances[msg.sender];
-    
-    // DANGEROUS: External call before state update
-    (bool success, ) = msg.sender.call{value: amount}("");
-    
-    // By the time we get here, attacker has already reentered!
-    balances[msg.sender] = 0;
-}
+// 1. Send ETH (external call)
+(bool success, ) = msg.sender.call{value: amount}("");
+
+// 2. Update state (TOO LATE!)
+balances[msg.sender] -= amount;
 ```
 
-### The Safe Pattern
-
-```solidity
-function withdraw() public {
-    uint256 amount = balances[msg.sender];
-    
-    // SAFE: Update state FIRST
-    balances[msg.sender] = 0;
-    
-    // Then make external call
-    (bool success, ) = msg.sender.call{value: amount}("");
-}
-```
-
-This is called **"Checks-Effects-Interactions"** pattern.
+The problem: **state is updated AFTER the external call, not before.**
 
 ---
 
-## 🔧 Lab Setup
+## 🚀 Quick Start (5 minutes)
 
-### Prerequisites
-
-- [Foundry installed](https://book.getfoundry.sh/getting-started/installation) (`forge`, `anvil`)
-- Basic Solidity knowledge
-- Command line comfort
-
-### Install Foundry (if needed)
-
+### Step 1: Install Foundry
 ```bash
 curl -L https://foundry.paradigm.xyz | bash
-~/.foundry/bin/foundryup
+source ~/.bashrc  # or ~/.zshrc
+foundryup
 ```
 
-### Project Structure
-
-```
-lab-00-reentrancy/
-├── src/
-│   ├── VulnerableBank.sol    # Vulnerable contract
-│   └── Attacker.sol          # Exploit contract
-├── test/
-│   └── ReentrancyExploit.t.sol  # Test suite
-├── foundry.toml              # Foundry config
-└── README.md                 # This file
-```
-
----
-
-## 🚀 Step-by-Step Guide
-
-### Step 1: Build the Contracts
-
+### Step 2: Run the Tests
 ```bash
-cd lab-00-reentrancy
-forge build
-```
-
-Expected output:
-```
-Compiling 3 files with 0.8.20
-Solc 0.8.20 finished in 00.500s
-Compiler run successful!
-```
-
-### Step 2: Run All Tests
-
-```bash
+cd /path/to/lab-00-reentrancy
 forge test -vv
 ```
 
-This runs the entire test suite. You should see:
-- ✅ `test_NormalDeposit` — Normal usage works
-- ✅ `test_NormalWithdraw` — Users can withdraw normally
-- ✅ `test_MultipleDeposits` — Multiple users can coexist
-- ✅ `test_ReentrancyAttack` — **THE VULNERABILITY IS DEMONSTRATED HERE**
+### Expected: All tests pass, showing the vulnerability succeeds
 
-### Step 3: Focus on the Attack Test
+---
 
-Run just the reentrancy attack test:
+## 🔍 Lab Walkthrough
 
-```bash
-forge test -vv -k "test_ReentrancyAttack"
+### File Structure
+```
+lab-00-reentrancy/
+├── VulnerableBank.sol           # The vulnerable contract
+├── Attacker.sol                 # The exploit contract
+├── ReentrancyExploit.t.sol      # Foundry test suite
+├── foundry.toml                 # Foundry config
+└── README.md                    # This file
 ```
 
-Output (showing the attack):
-```
-[PASS] test_ReentrancyAttack() (gas: 87654)
-  Attacker balance before: 1000000000000000000
-  Attacker balance after: 6000000000000000000
-  Bank balance after attack: 100000000000000
-  Attack reenter count: 6
-```
+### The Vulnerable Code
 
-**What this means:**
-- Attacker started with 1 ETH
-- After the attack, they have 6 ETH
-- They stole 5 ETH from legitimate users!
-- The attack triggered 6 reentrant calls
-
-### Step 4: Analyze the Code
-
-Open `src/VulnerableBank.sol` and find:
-
+In `VulnerableBank.sol`:
 ```solidity
-function withdraw() public {
-    uint256 amount = balances[msg.sender];
-    
-    // ⚠️ VULNERABLE LINE:
+function withdraw(uint256 amount) public {
+    require(balances[msg.sender] >= amount, "Insufficient balance");
+
+    // VULNERABLE: External call before state update
     (bool success, ) = msg.sender.call{value: amount}("");
-    
-    // Attacker's receive() is called here!
-    // They can call withdraw() again before this next line runs:
-    balances[msg.sender] = 0;  // ← Too late! Already reentered
+    require(success, "Withdrawal failed");
+
+    // State update happens too late!
+    balances[msg.sender] -= amount;
 }
 ```
 
-### Step 5: Understand the Attacker
+**The Problem:**
+1. Sends ETH before updating balance
+2. Attacker's receive() hook can call back
+3. Balance check uses stale state
 
-Open `src/Attacker.sol` and focus on:
+### The Attack
 
+In `Attacker.sol`:
 ```solidity
+function attack(uint256 initialAmount) public payable {
+    // 1. Deposit into the bank
+    bank.deposit{value: initialAmount}();
+
+    // 2. Start withdrawal (triggers the reentrancy)
+    bank.withdraw(initialAmount);
+}
+
 receive() external payable {
-    attackCount++;
-    uint256 bankBalance = bank.getBalance(address(this));
-    
-    if (bankBalance > 0) {
-        bank.withdraw();  // ← Reenters here!
+    // 3. Called when bank sends ETH
+    // 4. Call withdraw() again while state is inconsistent
+    if (bank.getUserBalance(address(this)) >= amountToWithdraw) {
+        bank.withdraw(amountToWithdraw);  // Reenters!
     }
 }
 ```
 
-**Why this works:**
-1. When `withdraw()` calls `msg.sender.call{}`, the attacker's `receive()` is triggered
-2. `receive()` immediately calls `withdraw()` again
-3. Since `balances[attacker]` hasn't been zeroed yet, the second call succeeds
-4. Loop continues until bank is drained or gas runs out
+---
 
-### Step 6: Measure Depth
+## 📝 Lab Exercises
 
+### Exercise 1: Run the Tests
 ```bash
-forge test -vv -k "test_MeasureReentrancyDepth"
+forge test -vv --match-path "*ReentrancyExploit*"
 ```
 
-This shows how many times the attacker reentered before being stopped.
+**Questions:**
+- How many times does the attacker reenter?
+- How much ETH does the attacker steal total?
+
+### Exercise 2: Analyze the Vulnerability
+1. Open `VulnerableBank.sol`
+2. Find the root cause
+3. Identify the exact line that enables the attack
+4. Explain the execution order
+
+### Exercise 3: Trace the Attack
+Draw out the call stack showing:
+- When balance is checked
+- When ETH is sent
+- When the attacker reenters
+- When state is updated
 
 ---
 
-## 🔍 Analysis Questions
+## 🛡️ The Fix
 
-Use Claude Code to analyze this lab. Try these prompts:
+**Checks-Effects-Interactions Pattern:**
 
-### Prompt 1: Understand the Flow
-> Analyze the withdraw() function in VulnerableBank.sol and explain the exact sequence of events when the Attacker calls withdraw(). Show the function calls step-by-step.
+Update state BEFORE making external calls:
 
-### Prompt 2: Identify the Fix
-> What is the minimal change needed to fix the reentrancy vulnerability in VulnerableBank.sol? Explain why your fix works.
+```solidity
+function withdraw(uint256 amount) public {
+    require(amount > 0, "Withdrawal amount must be greater than 0");
+    require(balances[msg.sender] >= amount, "Insufficient balance");
 
-### Prompt 3: Prevention Patterns
-> What are the three main patterns to prevent reentrancy attacks? Compare their pros/cons.
+    // FIX 1: Update state FIRST
+    balances[msg.sender] -= amount;
 
----
+    // FIX 2: Then make external call
+    (bool success, ) = msg.sender.call{value: amount}("");
+    require(success, "Withdrawal failed");
+}
+```
 
-## 📖 Further Reading
-
-### This Lab Covered:
-- [Reentrancy vulnerability (SWC-107)](https://swcregistry.io/docs/SWC-107)
-- [Checks-Effects-Interactions pattern](https://docs.soliditylang.org/en/develop/security-considerations.html#use-the-checks-effects-interactions-pattern)
-- [Real incident: The DAO Hack (2016)](https://www.coindesk.com/understanding-dao-hack-journalists)
-
-### Recommended Resources:
-- [OpenZeppelin ReentrancyGuard](https://github.com/OpenZeppelin/openzeppelin-contracts/blob/master/contracts/security/ReentrancyGuard.sol)
-- [Solidity Security Considerations](https://docs.soliditylang.org/en/develop/security-considerations.html)
-- [Slither static analyzer](https://github.com/crytic/slither) — Detects reentrancy automatically
-- [MythX](https://mythx.io/) — Professional smart contract analysis
+**Why this works:**
+- If attacker calls withdraw() again in receive(), balance check fails
+- Reentrant call reverts before any ETH is sent
+- State is protected
 
 ---
 
-## 🎯 Key Takeaways
+## 🧪 Running Tests
 
-1. **Reentrancy is dangerous** — Can drain contracts of user funds
-2. **The pattern matters** — State updates BEFORE external calls
-3. **Recognize the pattern** — Look for `.call()`, `.transfer()` before balance updates
-4. **Fix is simple** — Reorder your code (Checks-Effects-Interactions)
-5. **Use tools** — Slither can detect this automatically
+```bash
+# All tests
+forge test -vv
 
----
+# Just reentrancy tests
+forge test --match "Reentrancy"
 
-## 🚨 What NOT to Do
-
-❌ Deploy to mainnet  
-❌ Send real funds to test contracts  
-❌ Copy-paste vulnerable patterns into production  
-❌ Assume "it's too obvious to miss"  
+# With gas reporting
+forge test --gas-report
+```
 
 ---
 
-## ✅ Next Steps
+## 📚 Further Reading
 
-1. **Fix the vulnerability** — Modify `VulnerableBank.sol` to prevent reentrancy
-2. **Run tests again** — Verify your fix prevents the attack
-3. **Study the fix** — Understand why it works
-4. **Apply the pattern** — Use this in your own code
-
----
-
-## 📞 Getting Help
-
-- Ask in the Discord #discussion channel
-- Reference the facilitator guide for classroom setup
-- Use Claude Code to analyze patterns
-- Submit findings via GitHub
+- Reentrancy Attacks: https://github.com/crytic/slither/wiki/Detector-Documentation#reentrancy
+- Checks-Effects-Interactions: https://solidity.readthedocs.io/en/latest/security-considerations.html#re-entrancy
+- The DAO Attack (2016): https://blog.openzeppelin.com/reentrancy-after-istanbul/
+- SWC-107: https://swcregistry.io/docs/SWC-107
 
 ---
 
-**Duration:** 20 minutes  
-**Next Lab:** Week 1 — Integer Overflow/Underflow  
-**Happy Hacking! 🎓**
+## 🎓 Next Week: The Fix
+
+In Lab 01, we'll implement:
+1. Checks-Effects-Interactions pattern
+2. Reentrancy guard (OpenZeppelin)
+3. Test both defenses
+
+---
+
+**Ready? Run `forge test -vv` and observe the vulnerability in action!**
